@@ -1,0 +1,39 @@
+name: Daily NIO Scraper
+
+on:
+  schedule:
+    # 每天北京时间 20:00 运行 (UTC 12:00)
+    - cron: '0 12 * * *'
+  workflow_dispatch: # 允许你手动点击按钮运行测试
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium
+
+      - name: Run scraper
+        run: python scraper.py
+
+      - name: Commit and push data
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add nio_power_data.csv
+          # 如果没有变化（比如抓取失败），不报错
+          git commit -m "Update NIO data" || exit 0
+          git push
