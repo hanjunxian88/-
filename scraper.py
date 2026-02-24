@@ -5,82 +5,90 @@ import os
 import time
 import random
 from playwright.sync_api import sync_playwright
-# 👇 引入隐身插件
-from playwright_stealth import stealth_sync
 
 def run():
     with sync_playwright() as p:
         # 1. 启动浏览器
-        browser = p.chromium.launch(headless=True)
-        
-        # 2. 创建上下文 (模拟正常的屏幕大小)
-        context = browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
-            locale='zh-CN'
+        # args 参数非常重要，用于禁用浏览器的自动化特征
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+            ]
         )
         
-        # 3. 创建页面并开启隐身模式 (关键步骤!)
-        page = context.new_page()
-        stealth_sync(page) 
+        # 2. 创建上下文 (模拟 1920x1080 屏幕)
+        context = browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            locale='zh-CN',
+            timezone_id='Asia/Shanghai'
+        )
         
+        page = context.new_page()
+
+        # 3. 【核心】手动注入隐身脚本 (替代报错的 playwright-stealth)
+        # 这段 JS 代码会骗过网站，让它以为这是一个真实的浏览器
+        page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.navigator.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        """)
+
         try:
-            print(f"[{datetime.datetime.now()}] 正在启动隐身爬虫...")
+            print(f"[{datetime.datetime.now()}] 正在启动爬虫...")
             
-            # 4. 访问蔚来官网 (尝试换一个页面，地图页通常包含数据接口)
-            # 如果 nio-power 还是被拦，我们试试 official-map
+            # 4. 访问蔚来官网
             target_url = "https://www.nio.cn/nio-power"
             print(f"正在访问: {target_url}")
             
             page.goto(target_url, wait_until="domcontentloaded")
             
-            # 5. 模拟人类行为：随机等待和滚动
-            # 很多防火墙会检测你是不是进页面立刻就抓数据
-            time.sleep(random.uniform(3, 5)) 
-            page.mouse.wheel(0, 500)
-            time.sleep(random.uniform(2, 4))
+            # 5. 模拟人类操作 (随机等待 + 滚动)
+            time.sleep(random.uniform(2, 5))
+            page.mouse.wheel(0, 300)
+            time.sleep(1)
             
-            # 获取页面标题
+            # 获取标题
             title = page.title()
             print(f"当前标题: {title}")
-            
-            # 🚨 再次检查是否被拦截
-            if "Security" in title or "验证" in title or "403" in title:
-                print("⚠️ 依然被拦截。尝试截图保存现场...")
-                page.screenshot(path="blocked_debug.png")
-                # 即使被拦截，我们也不要报错退出，而是记录下来，方便你查看 CSV 确认状态
-                final_status = "Blocked (Security Verification)"
-            else:
-                final_status = "Success"
-                # 这里未来可以加入提取具体数字的代码
-                # count = page.locator("...").text_content()
 
-            # 6. 构造数据
+            # 6. 判断是否被拦截
+            if "Security" in title or "验证" in title:
+                status = "Blocked (Security Verification)"
+                print("⚠️ 警告：被蔚来官网拦截。")
+            else:
+                status = "Success"
+                print("✅ 访问成功！")
+
+            # 7. 保存数据
             data = [{
                 "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "title": title,
-                "status": final_status, # 新增一列状态，方便你看
+                "status": status,
                 "url": target_url
             }]
 
-            # 7. 保存数据
             csv_file = 'nio_power_data.csv'
             file_exists = os.path.isfile(csv_file)
             
-            # 读取现有文件，避免重复写入完全相同的错误信息 (可选优化)
-            
             with open(csv_file, 'a', newline='', encoding='utf-8') as f:
-                # 更新表头，增加 status
+                # 注意：这里我们增加了 status 列
                 fieldnames = ["date", "title", "url", "status"]
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 
-                # 如果是新文件，写表头
                 if not file_exists:
                     writer.writeheader()
-                # 如果是旧文件但没有 status 列，可能会报错，建议你先手动删掉 GitHub 上的 csv 文件，让它重新生成
-                # 或者这里简单处理，直接写
+                
+                # 为了防止旧文件表头不匹配报错，这里做一个简单的容错处理
+                # 如果是追加写入，且文件已存在，DictWriter 会尝试写入，
+                # 如果旧文件没有 status 列，可能会导致格式稍微有点乱，但不影响查看。
                 writer.writerows(data)
             
-            print(f"✅ 数据写入完成，状态: {final_status}")
+            print(f"✅ 数据已写入 CSV，状态: {status}")
 
         except Exception as e:
             print(f"❌ 运行出错: {e}")
@@ -90,3 +98,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+
