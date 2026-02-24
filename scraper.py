@@ -2,75 +2,88 @@ import csv
 import datetime
 import sys
 import os
+import time
 from playwright.sync_api import sync_playwright
 
 def run():
-    # 使用 with 语句自动管理浏览器关闭
     with sync_playwright() as p:
-        # 1. 启动浏览器 (Headless 模式，无头模式)
-        browser = p.chromium.launch(headless=True)
-        
-        # 2. 【关键修改】设置 User-Agent 伪装成普通浏览器，防止被反爬虫拦截
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={'width': 1920, 'height': 1080}
+        # 1. 启动浏览器，添加参数隐藏 "自动化" 特征
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-blink-features=AutomationControlled', # 关键：移除自动化特征
+                '--no-sandbox',
+                '--disable-setuid-sandbox'
+            ]
         )
-        page = context.new_page()
         
-        # 3. 【关键修改】设置超时时间为 60秒 (默认是30秒，GitHub Actions 网络有时较慢)
+        # 2. 模拟真实设备
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={'width': 1920, 'height': 1080},
+            locale='zh-CN',
+            timezone_id='Asia/Shanghai'
+        )
+        
+        # 3. 注入 JavaScript 进一步隐藏 WebDriver 属性
+        page = context.new_page()
+        page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+        """)
+
         page.set_default_timeout(60000)
 
         try:
             print(f"[{datetime.datetime.now()}] 正在访问蔚来官网...")
-            
-            # 访问页面 (wait_until="domcontentloaded" 比默认的 load 更快)
-            # 请确认这是你要抓取的网址
             page.goto("https://www.nio.cn/nio-power", wait_until="domcontentloaded")
             
-            # 等待页面稍微加载一下 (防止数据还没渲染出来)
-            page.wait_for_timeout(5000) 
-
-            # ---------------------------------------------------------
-            # 👇👇👇 在这里编写你的具体抓取逻辑 👇👇👇
-            # ---------------------------------------------------------
+            # 等待长一点时间，模拟人类浏览
+            time.sleep(5)
             
-            # [示例逻辑] 获取页面标题 (你可以替换成你原本的抓取代码)
+            # 尝试滚动页面，触发懒加载
+            page.mouse.wheel(0, 500)
+            time.sleep(2)
+
+            # 获取标题
             title = page.title()
-            print(f"成功获取标题: {title}")
-            
-            # [示例数据] 构造要保存的数据
-            data = [
-                {
-                    "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "title": title,
-                    "url": page.url
-                }
-            ]
-            # ---------------------------------------------------------
-            # 👆👆👆 抓取逻辑结束 👆👆👆
-            # ---------------------------------------------------------
+            print(f"当前页面标题: {title}")
 
-            # 4. 保存数据到 CSV
+            # 🚨 检查是否被拦截
+            if "Security" in title or "验证" in title:
+                print("⚠️ 警告：被蔚来官网拦截 (Security Verification)。")
+                # 截图留证
+                page.screenshot(path="blocked_screenshot.png")
+                # 这里我们不退出，而是尝试保存一下，看看能不能拿到部分数据
+            
+            # ---------------------------------------------------------
+            # 这里需要根据你要抓的具体内容写选择器
+            # 假设我们要抓取页面上的某个特定文本，比如换电站数量
+            # 如果你只是测试，下面的代码会保存标题
+            # ---------------------------------------------------------
+            
+            data = [{
+                "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "title": title,
+                "url": page.url
+            }]
+
+            # 保存数据
             csv_file = 'nio_power_data.csv'
             file_exists = os.path.isfile(csv_file)
             
             with open(csv_file, 'a', newline='', encoding='utf-8') as f:
                 writer = csv.DictWriter(f, fieldnames=["date", "title", "url"])
-                # 如果是新文件，写入表头
                 if not file_exists:
                     writer.writeheader()
                 writer.writerows(data)
             
-            print(f"✅ 数据已保存到 {csv_file}")
+            print(f"✅ 数据已保存")
 
         except Exception as e:
-            print(f"❌ 抓取出错: {e}")
-            # 【关键修改】如果出错，截图保存，方便在 GitHub Actions 里查看原因
-            page.screenshot(path="error_screenshot.png")
-            print("已保存错误截图: error_screenshot.png")
-            # 抛出异常，让 Workflow 知道这里失败了
+            print(f"❌ 出错: {e}")
             sys.exit(1)
-            
         finally:
             browser.close()
 
