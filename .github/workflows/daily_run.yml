@@ -38,18 +38,18 @@ jobs:
           path: error_screenshot.png
 
       - name: Commit and push data
-        # 只有当前面的步骤都成功时，才运行这一步
-        if: success() 
+        if: success()
         run: |
           git config --global user.name "GitHub Action"
           git config --global user.email "action@github.com"
           
-          # 检查 CSV 文件是否存在
           if [ -f nio_power_data.csv ]; then
             git add nio_power_data.csv
-            # 只有当文件有变化时才提交，防止空提交报错
-            git commit -m "Update NIO data: $(date +'%Y-%m-%d')" || echo "无数据变化，跳过提交"
-            git push
+            git commit -m "Update NIO data: $(date +'%Y-%m-%d')" || echo "无数据变化"
+            
+            # 👇👇👇 关键修改：先拉取远程最新代码，再推送 👇👇👇
+            git pull --rebase origin main
+            git push origin main
           else
-            echo "⚠️ 文件 nio_power_data.csv 不存在，跳过提交步骤。"
+            echo "⚠️ 文件不存在，跳过"
           fi
