@@ -26,6 +26,30 @@ jobs:
           pip install -r requirements.txt
           playwright install chromium
 
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium
+
+      # 👇👇👇 加上这一步，我们要看看到底有什么文件
+      - name: 🕵️ 侦探模式 - 列出所有文件
+        run: |
+          echo "=== 当前目录下的文件 (显示隐藏字符) ==="
+          ls -laQ  # -Q 参数会给文件名加引号，如果有空格立马现形！
+          echo "========================================"
+
+      - name: Run scraper
+        run: python scraper.py
+
       - name: Run scraper
         run: python scraper.py
 
